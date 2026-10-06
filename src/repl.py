@@ -1,80 +1,73 @@
-"""REPL для модели слоя доступа к данным
-
-Формат команд:
-    <имя_функции> [JSON-аргументы]
-
-Примеры:
-    create_participant {"identifier": 1, "datetime": 1000, "locale": "ru_RU", "platform": "windows"}
-    get_participants
-    get_participant 1
-    edit_participant 1 {"locale": "en_US"}
-    recent_input_platform_cache_hit 1100
-    help
-    exit
-"""
-
 import json
 import sys
 
 from . import model as m
 
+MIN_ARGS_EDIT = 2
+MAX_SPLIT = 2
 
 COMMANDS = {
-    # Participant
     "create_participant": m.create_participant,
     "get_participants": m.get_participants,
     "get_participant": m.get_participant,
     "edit_participant": m.edit_participant,
-    # Assignment
     "create_assignment": m.create_assignment,
     "get_assignments": m.get_assignments,
     "get_assignment": m.get_assignment,
     "edit_assignment": m.edit_assignment,
-    # Result
     "create_result": m.create_result,
     "get_results": m.get_results,
     "get_result": m.get_result,
     "edit_result": m.edit_result,
-    # Специальная выборка
     "recent_input_platform_cache_hit": m.recent_input_platform_cache_hit,
-    # Служебные
     "reset": m.reset,
 }
 
+NO_ARGS = (
+    "get_participants",
+    "get_assignments",
+    "get_results",
+    "reset",
+)
+
+ONE_ID = (
+    "get_participant",
+    "get_assignment",
+    "get_result",
+    "recent_input_platform_cache_hit",
+)
 
 HELP_TEXT = """Доступные команды:
 
-  --- Participant ---
-  create_participant <json>         создать участника
-  get_participants                  получить всех участников
-  get_participant <id>              получить участника по id
-  edit_participant <id> <json>      редактировать участника
+  Participant:
+    create_participant <json>
+    get_participants
+    get_participant <id>
+    edit_participant <id> <json>
 
-  --- Assignment ---
-  create_assignment <json>          создать задание
-  get_assignments                   получить все задания
-  get_assignment <id>               получить задание по id
-  edit_assignment <id> <json>       редактировать задание
+  Assignment:
+    create_assignment <json>
+    get_assignments
+    get_assignment <id>
+    edit_assignment <id> <json>
 
-  --- Result ---
-  create_result <json>              создать результат
-  get_results                       получить все результаты
-  get_result <id>                   получить результат по id
-  edit_result <id> <json>           редактировать результат
+  Result:
+    create_result <json>
+    get_results
+    get_result <id>
+    edit_result <id> <json>
 
-  --- Специальные ---
-  recent_input_platform_cache_hit <now>
-                                    выборка по формуле (input, platform, cache_hit)
-  reset                             очистить все таблицы
-  help                              показать эту справку
-  exit                              выйти
+  Специальные:
+    recent_input_platform_cache_hit <now>
+    reset
+    help
+    exit
 
-Формат JSON: {"key": value, ...} (одинарные кавычки не поддерживаются)
+Формат JSON: {"key": value, ...}
 """
 
 
 def _parse_json(text: str) -> dict:
-    """Парсит JSON-строку, возвращает dict."""
     if not text.strip():
         return {}
     try:
@@ -87,20 +80,54 @@ def _parse_json(text: str) -> dict:
 
 
 def _parse_id(text: str) -> int:
-    """Парсит целочисленный идентификатор."""
     try:
         return int(text.strip())
     except ValueError as e:
         raise ValueError(f"expected integer id, got: {text!r}") from e
 
 
+def _call_no_args(func):
+    return func()
+
+
+def _call_one_id(cmd: str, func, rest: list):
+    if len(rest) < 1:
+        raise ValueError(f"usage: {cmd} <id>")
+    return func(_parse_id(rest[0]))
+
+
+def _call_create(cmd: str, func, rest: list):
+    if len(rest) < 1:
+        raise ValueError(f"usage: {cmd} <json>")
+    return func(**_parse_json(" ".join(rest)))
+
+
+def _call_edit(cmd: str, func, rest: list):
+    if len(rest) < MIN_ARGS_EDIT:
+        raise ValueError(f"usage: {cmd} <id> <json>")
+    identifier = _parse_id(rest[0])
+    data = _parse_json(rest[1])
+    return func(identifier, **data)
+
+
+def _dispatch(cmd: str, rest: list, func):
+    if cmd in NO_ARGS:
+        return _call_no_args(func)
+    if cmd in ONE_ID:
+        return _call_one_id(cmd, func, rest)
+    if cmd.startswith("create_"):
+        return _call_create(cmd, func, rest)
+    if cmd.startswith("edit_"):
+        return _call_edit(cmd, func, rest)
+    raise ValueError(f"unhandled command '{cmd}'")
+
+
 def handle(line: str) -> None:
-    """Обрабатывает одну строку ввода."""
     line = line.strip()
     if not line:
         return
 
-    parts = line.split(maxsplit=2)
+    parts = line.split(maxsplit=MAX_SPLIT)
     cmd = parts[0]
     rest = parts[1:]
 
@@ -113,53 +140,13 @@ def handle(line: str) -> None:
         return
 
     if cmd not in COMMANDS:
-        print(f"error: unknown command '{cmd}'. Type 'help' for list.")
+        msg = f"error: unknown command '{cmd}'. " "Type 'help' for list."
+        print(msg)
         return
 
-    func = COMMANDS[cmd]
-
     try:
-        # --- Команды без аргументов ---
-        if cmd in ("get_participants", "get_assignments", "get_results", "reset"):
-            result = func()
-            print(result)
-
-        # --- Команды с одним id: get_<entity> <id> ---
-        elif cmd in ("get_participant", "get_assignment", "get_result"):
-            if len(rest) < 1:
-                raise ValueError(f"usage: {cmd} <id>")
-            identifier = _parse_id(rest[0])
-            result = func(identifier)
-            print(result)
-
-        # --- recent_input_platform_cache_hit <now> ---
-        elif cmd == "recent_input_platform_cache_hit":
-            if len(rest) < 1:
-                raise ValueError(f"usage: {cmd} <now>")
-            now = _parse_id(rest[0])
-            result = func(now)
-            print(result)
-
-        # --- create_<entity> <json> ---
-        elif cmd.startswith("create_"):
-            if len(rest) < 1:
-                raise ValueError(f"usage: {cmd} <json>")
-            data = _parse_json(" ".join(rest))
-            result = func(**data)
-            print(result)
-
-        # --- edit_<entity> <id> <json> ---
-        elif cmd.startswith("edit_"):
-            if len(rest) < 2:
-                raise ValueError(f"usage: {cmd} <id> <json>")
-            identifier = _parse_id(rest[0])
-            data = _parse_json(rest[1])
-            result = func(identifier, **data)
-            print(result)
-
-        else:
-            print(f"error: unhandled command '{cmd}'")
-
+        result = _dispatch(cmd, rest, COMMANDS[cmd])
+        print(result)
     except TypeError as e:
         print(f"error: wrong arguments for '{cmd}': {e}")
     except ValueError as e:
@@ -167,7 +154,7 @@ def handle(line: str) -> None:
 
 
 def main() -> None:
-    print("REPL for variant 12 data model. Type 'help' for commands, 'exit' to quit.")
+    print("REPL for variant 12 data model. " "Type 'help', 'exit' to quit.")
     while True:
         try:
             line = input("variant12> ")
