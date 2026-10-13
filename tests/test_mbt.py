@@ -65,8 +65,8 @@ class Variant12Machine(RuleBasedStateMachine):
     def _assert_equal(self, rpc_result, local_result):
         """Проверка равенства результатов."""
         assert _norm(rpc_result) == _norm(local_result), (
-            f"mismatch:\n"
-            f" RPC   = {rpc_result}\n"
+            f"mismatch: \n"
+            f" RPC = {rpc_result}\n"
             f" local = {local_result}"
         )
 

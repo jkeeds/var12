@@ -84,7 +84,8 @@ def serve_forever() -> None:
         srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         srv.bind((HOST, PORT))
         srv.listen(5)
-        print(f"RPC server listening on {HOST}:{PORT}")
+        address = str(HOST) + ":" + str(PORT)
+        print(f"RPC server listening on {address}")
 
         while True:
             conn, addr = srv.accept()
